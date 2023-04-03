@@ -29,12 +29,12 @@ def clear_dir(dir):
 # Download raw dataset file from 
 # #https://github.com/jchazalon/smartdoc15-ch1-dataset/releases/download/v2.0.0/frames.tar.gz
 def download_dataset():
-    if not os.path.exists(target:= os.path.join('./data', RAW_DIR_NAME)):
+    if not os.path.exists(target:=RAW_DIR_NAME):
         os.mkdir(target)
     else:
         return False
 
-    os.system(f'./data/download_data.sh')
+    os.system(f'./download_data.sh')
     return True
 
 def _load_annotation(file, df, split_ratio, prog, task):
@@ -80,6 +80,11 @@ def _load_annotation(file, df, split_ratio, prog, task):
 # Load dataset from ./data/raw by saving the images and masks in ./data/train and ./data/val
 @in_top_dir
 def load_dataset(split_ratio=0.8, clear_existing=False):
+    if not os.path.exists('raw'):
+        print('[red]Dataset not found, downloading...')
+        download_dataset()
+        print('[green]Dataset downloaded')
+
     for dir in ['train', 'val']:
         if not os.path.exists(dir):
             os.mkdir(dir)
