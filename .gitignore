@@ -1,0 +1,8 @@
+data/train/
+data/val/
+data/raw
+**/__pycache__
+out/
+checkpoints/
+cysignals_crash_logs/
+logs/
