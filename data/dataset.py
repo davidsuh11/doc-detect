@@ -7,7 +7,6 @@ import numpy as np
 from .augments import augmentations_train, preprocess_train
 from rich import print
 import random
-import fire
 import yaml
 
 # Decorator change directory to 'data' before function call
@@ -109,5 +108,3 @@ def build_dataloaders(batch_size=32, num_workers=2):
 
     return train_loader, val_loader
 
-if __name__ == '__main__':
-    fire.Fire(build_dataloaders)
