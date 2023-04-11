@@ -14,8 +14,7 @@ def main(args):
 
     # Build dataloaders
     train_loader, val_loader = build_dataloaders(batch_size=args.batch_size, 
-                                                 num_workers=args.num_workers,
-                                                 reload_dataset=args.load_dataset)
+                                                 num_workers=args.num_workers)
     
     # Build optimizer
     optimizer = torch.optim.Adam(model.parameters(), lr=args.lr)

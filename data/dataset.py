@@ -1,19 +1,17 @@
 import os
-import pandas as pd
-from PIL import Image, ImageDraw
-from matplotlib import pyplot as plt
-
+from PIL import Image
+import gdown
 import torch
-import albumentations as A
 from torch.utils.data import Dataset, DataLoader
 import numpy as np
 from .augments import augmentations_train, preprocess_train
 from rich import print
-from rich.progress import Progress
-RAW_DIR_NAME = 'raw'
+import random
+import fire
+import yaml
 
 # Decorator change directory to 'data' before function call
-def in_top_dir(func):
+def in_pkg_dir(func):
     def wrapper(*args, **kwargs):
         os.chdir('./data')
         ret = func(*args, **kwargs)
@@ -21,96 +19,48 @@ def in_top_dir(func):
         return ret
     return wrapper
 
-# Delete all files in directory
-def clear_dir(dir):
-    for file in os.listdir(dir):
-        os.remove(os.path.join(dir, file))
 
-# Download raw dataset file from 
-# #https://github.com/jchazalon/smartdoc15-ch1-dataset/releases/download/v2.0.0/frames.tar.gz
+# Download dataset from Google Drive 
+# https://drive.google.com/file/d/1Wsw5VTVLMawzbcep47zkscXawd7gfHzT/view?usp=sharing
 def download_dataset():
-    if not os.path.exists(target:=RAW_DIR_NAME):
-        os.mkdir(target)
-    else:
-        return False
+    gdown.download('https://drive.google.com/uc?id=1Wsw5VTVLMawzbcep47zkscXawd7gfHzT', 
+                   './data.zip', fuzzy=True)
+    os.system('unzip data.zip')
+    os.system('rm data.zip')
 
-    os.system(f'./download_data.sh')
-    return True
-
-def _load_annotation(file, df, split_ratio, prog, task):
-    # Load annotation file ./data/raw/metadata.csv as csv in pandas
-    filepath = os.path.join(RAW_DIR_NAME, file)
-
-    current_frame = 1
-    total_frames = len(os.listdir(filepath))
-    
-
-    for impath in os.listdir(filepath):
-        target_dir = 'train' if current_frame < total_frames * split_ratio else 'val'
-
-        # Load image
-        im = Image.open(os.path.join(filepath, impath))
-        local_impath = os.path.join(file, impath)
-
-        # Load annotation
-        annotation = df[df['image_path'] == local_impath]
-        coords = [
-            annotation['tl_x'], annotation['tl_y'],
-            annotation['tr_x'], annotation['tr_y'],
-            annotation['br_x'], annotation['br_y'],
-            annotation['bl_x'], annotation['bl_y']
-        ]
-        coords = [int(x) for x in coords]
-
-        # Create mask
-        mask = Image.new('L', im.size, 0)
-        draw = ImageDraw.Draw(mask)
-        draw.polygon(coords, fill=1, outline=1)
-
-        # Save mask
-        namedata = file.split('/')
-        to_save = f'{namedata[0]}_{namedata[1]}_{impath}'
-
-        mask.save(os.path.join(target_dir, 'masks', to_save))
-        im.save(os.path.join(target_dir, 'images', to_save))
-        current_frame += 1
-    
-    prog.update(task, advance=1)
-        
 # Load dataset from ./data/raw by saving the images and masks in ./data/train and ./data/val
-@in_top_dir
-def load_dataset(split_ratio=0.8, clear_existing=False):
-    if not os.path.exists('raw'):
-        print('[red]Dataset not found, downloading...')
+@in_pkg_dir
+def load_dataset():
+    if not os.path.exists('data'):
         download_dataset()
-        print('[green]Dataset downloaded')
+    if not os.path.exists('train'):
+        os.mkdir('train')
+        os.mkdir('train/images')
+        os.mkdir('train/masks')
+        os.mkdir('val')
+        os.mkdir('val/images')
+        os.mkdir('val/masks')
 
-    for dir in ['train', 'val']:
-        if not os.path.exists(dir):
-            os.mkdir(dir)
-        if not os.path.exists(os.path.join(dir, 'images')):
-            os.mkdir(os.path.join(dir, 'images'))
-        if not os.path.exists(os.path.join(dir, 'masks')):
-            os.mkdir(os.path.join(dir, 'masks'))
+        if not os.path.exists('split.yaml'):
+            image_list = os.listdir(os.path.join('data', 'images'))
+            random.shuffle(image_list)
+            train_list = image_list[:int(len(image_list)*0.8)]
+            val_list = image_list[int(len(image_list)*0.8):]
+            with open('split.yaml', 'w') as f:
+                yaml.dump({'train': train_list, 'val': val_list}, f)
+        else:
+            with open('split.yaml', 'r') as f:
+                split = yaml.load(f, Loader=yaml.FullLoader)
+                train_list = split['train']
+                val_list = split['val']
 
-    if clear_existing:
-        for dir in ['train', 'val']:
-            clear_dir(os.path.join(dir, 'images'))
-            clear_dir(os.path.join(dir, 'masks'))
-
-    df = pd.read_csv(os.path.join(RAW_DIR_NAME, 'metadata.csv'))
-    
-    
-    with Progress() as prog:
-        task = prog.add_task("[red]Loading dataset...", total=5*5*5)
-        for n in range(1,6):
-            for j in range(1,6):
-                for type in ['datasheet', 'letter', 'magazine', 'paper', 'tax']:
-                    _load_annotation(f'background0{n}/{type}00{j}', df, split_ratio, prog, task)
-    prog.stop_task(task)
-    
-    print(f'Dataset loaded\n Train: {len(os.listdir("train/images"))}\nVal: {len(os.listdir("val/images"))}')
-
+        for image in train_list:
+            os.system(f'cp data/images/{image} train/images')
+            os.system(f'cp data/masks/{image} train/masks')
+        for image in val_list:
+            os.system(f'cp data/images/{image} val/images')
+            os.system(f'cp data/masks/{image} val/masks')
+        
 # Define dataset class -- assume use of Albumentations for transforms
 class DocSegmentDataset(Dataset):
     def __init__(self, root_dir, transform=None):
@@ -143,8 +93,9 @@ class DocSegmentDataset(Dataset):
         return image, mask
 
 # Return train and validation dataloaders
-def build_dataloaders(batch_size=4, num_workers=2, reload_dataset=False):
-    if reload_dataset: load_dataset()
+def build_dataloaders(batch_size=32, num_workers=2):
+    load_dataset()
+
     train_dataset = DocSegmentDataset('train', transform=augmentations_train)  
     val_dataset = DocSegmentDataset('val', transform=preprocess_train)
     
@@ -153,5 +104,10 @@ def build_dataloaders(batch_size=4, num_workers=2, reload_dataset=False):
     val_loader = DataLoader(val_dataset, batch_size=batch_size, 
                             shuffle=True, num_workers=num_workers)
 
+    print(f'[bold green]Train dataset loaded: {len(train_dataset)}[/bold green]')
+    print(f'[bold green]Validation dataset loaded: {len(val_dataset)}[/bold green]')
+
     return train_loader, val_loader
 
+if __name__ == '__main__':
+    fire.Fire(build_dataloaders)
